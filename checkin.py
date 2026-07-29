@@ -423,7 +423,30 @@ class PushService:
         logger.error(f"{LogEmoji.ERROR} 获取 access_token 失败: {data.get('errmsg')}")
         return None
 
-    def send(self, title: str, content: str) -> bool:
+    def _build_payload(self, msgtype: str, title: str, content: str, url: str = "", btntxt: str = "") -> Dict:
+        """构建消息 payload"""
+        payload = {
+            "touser": self.config.touser,
+            "msgtype": msgtype,
+            "agentid": int(self.config.agent_id),
+        }
+        if msgtype == "textcard":
+            textcard = {
+                "title": title,
+                "description": content,
+                "url": url,
+            }
+            if btntxt:
+                textcard["btntxt"] = btntxt
+            payload["textcard"] = textcard
+        else:
+            payload["markdown"] = {
+                "content": f"# {title}\n{content}"
+            }
+            payload["safe"] = 0
+        return payload
+
+    def send(self, title: str, content: str, msgtype: str = "markdown", url: str = "", btntxt: str = "") -> bool:
         """发送推送"""
         if not self.config.corp_id or not self.config.secret or not self.config.agent_id:
             logger.info(f"{LogEmoji.WARNING} 企业微信应用配置不完整，跳过推送通知。")
@@ -434,15 +457,7 @@ class PushService:
             if not token:
                 return False
 
-            payload = {
-                "touser": self.config.touser,
-                "msgtype": "markdown",
-                "agentid": int(self.config.agent_id),
-                "markdown": {
-                    "content": f"# {title}\n{content}"
-                },
-                "safe": 0,
-            }
+            payload = self._build_payload(msgtype, title, content, url, btntxt)
             headers = {"Content-Type": "application/json"}
             resp = self.session.post(
                 self.SEND_URL,
@@ -539,8 +554,8 @@ class Checker:
         """获取所有结果"""
         return [result.to_dict() for result in self.results]
 
-    def format_results(self) -> Tuple[str, str, str]:
-        """格式化结果"""
+    def format_results(self) -> Tuple[str, str, str, str]:
+        """格式化结果，返回 title, markdown_content, log_content, html_description"""
         results = self.get_results()
 
         success_count = sum(1 for r in results if r["code"] == CheckinStatus.SUCCESS)
@@ -549,26 +564,40 @@ class Checker:
 
         title = f"GLaDOS 签到  成功:{success_count}  失败:{fail_count}  重复:{repeat_count}"
 
-        send_content_lines = []
-        log_content_lines = []
+        md_lines = []
+        html_parts = []
+        log_lines = []
+
         for i, res in enumerate(results, 1):
-            line = (
+            md_lines.append(
                 f">**#{i}**\n"
                 f">积分: {res['points']}  剩余: {res['days']}天  总积分: {res['points_total']} 积分\n"
                 f">状态: {res['status']}\n"
                 f">兑换: {res['exchange']}"
             )
-            send_content_lines.append(line)
+
+            html_parts.append(
+                f"<div class=\"gray\">#{i}</div>"
+                f"<div class=\"normal\">积分: {res['points']} | 剩余: {res['days']} | 总积分: {res['points_total']}</div>"
+                f"<div class=\"highlight\">状态: {res['status']} | 兑换: {res['exchange']}</div>"
+            )
 
             if self.config.verbose:
                 log_line = f"#{i} P:{res['points']} 剩余:{res['days']} 总积分:{res['points_total']} | {res['status']} | {res['exchange']}"
             else:
                 log_line = f"#{i} {res['status']}"
-            log_content_lines.append(log_line)
+            log_lines.append(log_line)
 
-        content = "\n\n".join(send_content_lines)
-        log_content = "\n".join(log_content_lines)
-        return title, content, log_content
+        md_content = "\n\n".join(md_lines)
+        html_content = "\n".join(html_parts)
+        log_content = "\n".join(log_lines)
+
+        summary_html = (
+            f"<div class=\"gray\">成功: {success_count} | 失败: {fail_count} | 重复: {repeat_count}</div>\n"
+            f"{html_content}"
+        )
+
+        return title, md_content, log_content, summary_html
 
 
 # 初始化日志
@@ -584,7 +613,10 @@ def main():
 
         if not config.cookies_list:
             logger.error(f"{LogEmoji.ERROR} 未找到有效的 Cookie, 退出程序。")
-            title, content = "# 未找到 cookies!", ""
+            title = "GLaDOS 签到"
+            md_content = "未找到有效的 Cookie"
+            log_content = "未找到有效的 Cookie"
+            html_content = "<div class=\"highlight\">未找到有效的 Cookie</div>"
         else:
             # 2. 执行签到
             logger.info(f"{LogEmoji.START} 步骤 2: 执行签到")
@@ -593,17 +625,21 @@ def main():
 
             # 3. 格式化结果
             logger.info(f"{LogEmoji.START} 步骤 3: 格式化结果")
-            title, content, log_content = checker.format_results()
+            title, md_content, log_content, html_content = checker.format_results()
             logger.info(f"\n{LogEmoji.END}========== 签到总结 ==========\n{title}\n{log_content}")
 
     except Exception as e:
         logger.error(f"{LogEmoji.ERROR} 主程序执行过程中发生未预期的错误: {e}")
-        title, content, log_content = "# 脚本执行出错", str(e), str(e)
+        title = "GLaDOS 签到出错"
+        md_content = str(e)
+        log_content = str(e)
+        html_content = f"<div class=\"highlight\">脚本执行出错: {e}</div>"
 
     # 4. 发送推送
     logger.info(f"{LogEmoji.START} 步骤 4: 发送推送")
     push_service = PushService(config if "config" in locals() else "")
-    push_service.send(title, content)
+    push_service.send(title, md_content, msgtype="markdown")
+    push_service.send(title, html_content, msgtype="textcard", url="https://glados.rocks")
     logger.info(f"{LogEmoji.END} 签到完成")
 
 
