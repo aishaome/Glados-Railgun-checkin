@@ -44,9 +44,18 @@
 
 > 不配置时默认为 `plan500`，即积分达到 500 时自动兑换 100 天
 
-4. 手机推送（非必须）
+4. 手机推送（非必须）- 企业微信应用号
 
-- 添加1个`repository secret`，命名为`PUSHDEER_SENDKEY`，其值对应 PushDeer key: ([获取地址](https://www.pushdeer.com/product.html))。
+- 添加以下 `repository secret`，用于通过企业微信应用号推送通知：
+
+| Secret | 说明 |
+|--------|------|
+| `CORP_ID` | 企业微信企业ID |
+| `SECRET` | 应用的Secret |
+| `AGENT_ID` | 应用的AgentId |
+| `TOUSER` | 接收成员ID，不填默认为 `@all`（可选） |
+
+- 在企业微信管理后台 -> 应用管理 -> 创建应用，获取以上参数。
 
 ### **star**自己的仓库
 

@@ -5,7 +5,6 @@ import logging
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, asdict
-from pypushdeer import PushDeer
 from logging_config import init_logger
 
 
@@ -94,7 +93,10 @@ def log_method(func):
 class Config:
     """应用配置"""
 
-    ENV_PUSH_KEY = "PUSHDEER_SENDKEY"
+    ENV_CORP_ID = "CORP_ID"
+    ENV_SECRET = "SECRET"
+    ENV_AGENT_ID = "AGENT_ID"
+    ENV_TOUSER = "TOUSER"
     ENV_COOKIES = "GLADOS_COOKIES"
     ENV_EXCHANGE_PLAN = "GLADOS_EXCHANGE_PLAN"
     ENV_VERBOSE = "GLADOS_VERBOSE"
@@ -116,7 +118,10 @@ class Config:
     }
 
     def __init__(self):
-        self.push_key: str = ""
+        self.corp_id: str = ""
+        self.secret: str = ""
+        self.agent_id: str = ""
+        self.touser: str = "@all"
         self.cookies_list: List[str] = []
         self.exchange_plan: str = self.DEFAULT_EXCHANGE_PLAN
         self.verbose: bool = self.DEFAULT_VERBOSE
@@ -124,16 +129,21 @@ class Config:
 
     def _load_config(self) -> None:
         """加载配置"""
-        push_key_env: Optional[str] = os.environ.get(self.ENV_PUSH_KEY)
+        corp_id_env: Optional[str] = os.environ.get(self.ENV_CORP_ID)
+        secret_env: Optional[str] = os.environ.get(self.ENV_SECRET)
+        agent_id_env: Optional[str] = os.environ.get(self.ENV_AGENT_ID)
+        touser_env: Optional[str] = os.environ.get(self.ENV_TOUSER)
         raw_cookies_env: Optional[str] = os.environ.get(self.ENV_COOKIES)
         exchange_plan_env: Optional[str] = os.environ.get(self.ENV_EXCHANGE_PLAN)
         verbose_env: Optional[str] = os.environ.get(self.ENV_VERBOSE)
 
-        if not push_key_env:
-            logger.warning(f"{LogEmoji.WARNING} 环境变量 '{self.ENV_PUSH_KEY}' 未设置。")
-            self.push_key = ""
-        else:
-            self.push_key = push_key_env
+        self.corp_id = corp_id_env or ""
+        self.secret = secret_env or ""
+        self.agent_id = agent_id_env or ""
+        self.touser = touser_env or "@all"
+
+        if not self.corp_id or not self.secret or not self.agent_id:
+            logger.warning(f"{LogEmoji.WARNING} 企业微信应用配置不完整 (CORP_ID / SECRET / AGENT_ID)，跳过推送。")
 
         if not raw_cookies_env:
             logger.warning(f"{LogEmoji.WARNING} 环境变量 '{self.ENV_COOKIES}' 未设置。")
@@ -155,7 +165,7 @@ class Config:
                 self.exchange_plan = self.DEFAULT_EXCHANGE_PLAN
 
         logger.info(f"{LogEmoji.INFO} 共加载了 {len(self.cookies_list)} 个 Cookie 用于签到。")
-        logger.info(f"{LogEmoji.INFO} 当前 {self.ENV_PUSH_KEY} {'已设置' if push_key_env else '未设置'}。")
+        logger.info(f"{LogEmoji.INFO} 企业微信推送: CORP_ID={'已设置' if self.corp_id else '未设置'}, SECRET={'已设置' if self.secret else '未设置'}, AGENT_ID={'已设置' if self.agent_id else '未设置'}, TOUSER={self.touser}。")
         logger.info(f"{LogEmoji.INFO} 当前 {self.ENV_EXCHANGE_PLAN}: {self.exchange_plan}。")
 
         if verbose_env is not None:
@@ -391,22 +401,63 @@ class CheckinResult:
 
 
 class PushService:
-    """推送服务"""
+    """推送服务 - 企业微信应用号"""
+
+    TOKEN_URL = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
+    SEND_URL = "https://qyapi.weixin.qq.com/cgi-bin/message/send"
 
     def __init__(self, config: Config):
         self.config = config
+        self.session = requests.Session()
+
+    def _get_token(self) -> Optional[str]:
+        """获取 access_token"""
+        resp = self.session.get(
+            self.TOKEN_URL,
+            params={"corpid": self.config.corp_id, "corpsecret": self.config.secret},
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("errcode") == 0:
+            return data["access_token"]
+        logger.error(f"{LogEmoji.ERROR} 获取 access_token 失败: {data.get('errmsg')}")
+        return None
 
     def send(self, title: str, content: str) -> bool:
         """发送推送"""
-        if not self.config.push_key:
-            logger.info(f"{LogEmoji.WARNING} 未设置推送密钥，跳过推送通知。")
+        if not self.config.corp_id or not self.config.secret or not self.config.agent_id:
+            logger.info(f"{LogEmoji.WARNING} 企业微信应用配置不完整，跳过推送通知。")
             return False
 
         try:
-            pushdeer = PushDeer(pushkey=self.config.push_key)
-            pushdeer.send_text(title, desp=content)
-            logger.info(f"{LogEmoji.SUCCESS} 推送通知发送成功。")
-            return True
+            token = self._get_token()
+            if not token:
+                return False
+
+            payload = {
+                "touser": self.config.touser,
+                "msgtype": "markdown",
+                "agentid": int(self.config.agent_id),
+                "markdown": {
+                    "content": f"## {title}\n{content}"
+                },
+                "safe": 0,
+            }
+            headers = {"Content-Type": "application/json"}
+            resp = self.session.post(
+                self.SEND_URL,
+                params={"access_token": token},
+                json=payload,
+                headers=headers,
+                timeout=15,
+            )
+            data = resp.json()
+            if data.get("errcode") == 0:
+                logger.info(f"{LogEmoji.SUCCESS} 企业微信推送通知发送成功。")
+                return True
+            else:
+                logger.error(f"{LogEmoji.ERROR} 企业微信推送失败: {data.get('errmsg')}")
+                return False
         except Exception as e:
             logger.error(f"{LogEmoji.ERROR} 发送推送通知失败: {e}")
             return False
