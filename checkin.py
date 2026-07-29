@@ -655,7 +655,6 @@ def main():
     logger.info(f"{LogEmoji.START} 步骤 4: 发送推送")
     push_service = PushService(config if "config" in locals() else "")
     push_service.send(title, text_content, msgtype="text")
-    push_service.send(title, html_content, msgtype="textcard", url="https://glados.rocks")
     logger.info(f"{LogEmoji.END} 签到完成")
 
 
