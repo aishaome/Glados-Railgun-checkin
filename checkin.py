@@ -439,6 +439,11 @@ class PushService:
             if btntxt:
                 textcard["btntxt"] = btntxt
             payload["textcard"] = textcard
+        elif msgtype == "text":
+            payload["text"] = {
+                "content": f"{title}\n{content}"
+            }
+            payload["safe"] = 0
         else:
             payload["markdown"] = {
                 "content": f"# {title}\n{content}"
@@ -554,8 +559,8 @@ class Checker:
         """获取所有结果"""
         return [result.to_dict() for result in self.results]
 
-    def format_results(self) -> Tuple[str, str, str, str]:
-        """格式化结果，返回 title, markdown_content, log_content, html_description"""
+    def format_results(self) -> Tuple[str, str, str, str, str]:
+        """格式化结果，返回 title, markdown_content, log_content, html_description, text_content"""
         results = self.get_results()
 
         success_count = sum(1 for r in results if r["code"] == CheckinStatus.SUCCESS)
@@ -567,6 +572,7 @@ class Checker:
         md_lines = []
         html_parts = []
         log_lines = []
+        text_lines = []
 
         for i, res in enumerate(results, 1):
             md_lines.append(
@@ -588,16 +594,24 @@ class Checker:
                 log_line = f"#{i} {res['status']}"
             log_lines.append(log_line)
 
+            text_lines.append(
+                f"#{i}\n"
+                f"积分: {res['points']}  剩余: {res['days']}天  总积分: {res['points_total']} 积分\n"
+                f"状态: {res['status']}\n"
+                f"兑换: {res['exchange']}"
+            )
+
         md_content = "\n\n".join(md_lines)
         html_content = "\n".join(html_parts)
         log_content = "\n".join(log_lines)
+        text_content = "\n\n".join(text_lines)
 
         summary_html = (
             f"<div class=\"gray\">成功: {success_count} | 失败: {fail_count} | 重复: {repeat_count}</div>\n"
             f"{html_content}"
         )
 
-        return title, md_content, log_content, summary_html
+        return title, md_content, log_content, summary_html, text_content
 
 
 # 初始化日志
@@ -617,6 +631,7 @@ def main():
             md_content = "未找到有效的 Cookie"
             log_content = "未找到有效的 Cookie"
             html_content = "<div class=\"highlight\">未找到有效的 Cookie</div>"
+            text_content = "未找到有效的 Cookie"
         else:
             # 2. 执行签到
             logger.info(f"{LogEmoji.START} 步骤 2: 执行签到")
@@ -625,7 +640,7 @@ def main():
 
             # 3. 格式化结果
             logger.info(f"{LogEmoji.START} 步骤 3: 格式化结果")
-            title, md_content, log_content, html_content = checker.format_results()
+            title, md_content, log_content, html_content, text_content = checker.format_results()
             logger.info(f"\n{LogEmoji.END}========== 签到总结 ==========\n{title}\n{log_content}")
 
     except Exception as e:
@@ -634,11 +649,12 @@ def main():
         md_content = str(e)
         log_content = str(e)
         html_content = f"<div class=\"highlight\">脚本执行出错: {e}</div>"
+        text_content = str(e)
 
     # 4. 发送推送
     logger.info(f"{LogEmoji.START} 步骤 4: 发送推送")
     push_service = PushService(config if "config" in locals() else "")
-    push_service.send(title, md_content, msgtype="markdown")
+    push_service.send(title, text_content, msgtype="text")
     push_service.send(title, html_content, msgtype="textcard", url="https://glados.rocks")
     logger.info(f"{LogEmoji.END} 签到完成")
 
