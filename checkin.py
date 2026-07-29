@@ -439,7 +439,7 @@ class PushService:
                 "msgtype": "markdown",
                 "agentid": int(self.config.agent_id),
                 "markdown": {
-                    "content": f"## {title}\n{content}"
+                    "content": f"# {title}\n{content}"
                 },
                 "safe": 0,
             }
@@ -547,21 +547,26 @@ class Checker:
         repeat_count = sum(1 for r in results if r["code"] == CheckinStatus.REPEAT)
         fail_count = sum(1 for r in results if r["code"] == CheckinStatus.FAILURE)
 
-        title = f"GLaDOS 签到, 成功{success_count}, 失败{fail_count}, 重复{repeat_count}"
+        title = f"GLaDOS 签到  成功:{success_count}  失败:{fail_count}  重复:{repeat_count}"
 
         send_content_lines = []
         log_content_lines = []
         for i, res in enumerate(results, 1):
-            line = f"#{i} P:{res['points']} 剩余:{res['days']} 总积分:{res['points_total']} | {res['status']} | {res['exchange']}"
+            line = (
+                f">**#{i}**\n"
+                f">积分: {res['points']}  剩余: {res['days']}天  总积分: {res['points_total']} 积分\n"
+                f">状态: {res['status']}\n"
+                f">兑换: {res['exchange']}"
+            )
             send_content_lines.append(line)
 
             if self.config.verbose:
-                log_line = line
+                log_line = f"#{i} P:{res['points']} 剩余:{res['days']} 总积分:{res['points_total']} | {res['status']} | {res['exchange']}"
             else:
                 log_line = f"#{i} {res['status']}"
             log_content_lines.append(log_line)
 
-        content = "\n".join(send_content_lines)
+        content = "\n\n".join(send_content_lines)
         log_content = "\n".join(log_content_lines)
         return title, content, log_content
 
